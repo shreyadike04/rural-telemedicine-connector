@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template , redirect, url_for
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 import uuid
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VideoGrant
@@ -9,6 +9,8 @@ load_dotenv()
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+from flask_mail import Mail, Message
+from flask_migrate import Migrate
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
@@ -20,6 +22,16 @@ app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["JSON_SORT_KEYS"] = False
 
+# Email configuration for appointment confirmations
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
+
+mail = Mail(app)
+
 # Load credentials from environment variables (NOT hardcoded in code)
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_API_KEY_SID = os.getenv("TWILIO_API_KEY_SID")
@@ -27,6 +39,7 @@ TWILIO_API_KEY_SECRET = os.getenv("TWILIO_API_KEY_SECRET")
 
 CORS(app)
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)  # Initialize Flask-Migrate
 
 # Database Models
 class Doctor(db.Model):
@@ -35,10 +48,13 @@ class Doctor(db.Model):
     specialty = db.Column(db.String(120), nullable=False)
     city = db.Column(db.String(50), nullable=False)
     experience_years = db.Column(db.Integer, default=0)
+    email = db.Column(db.String(120), nullable=True)
 
 class Appointment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     patient_name = db.Column(db.String(120), nullable=False)
+    patient_email = db.Column(db.String(120), nullable=True)
+    patient_phone = db.Column(db.String(20), nullable=True)
     city = db.Column(db.String(50), nullable=False)
     doctor = db.Column(db.String(120), nullable=False)
     date = db.Column(db.String(10), nullable=False)
@@ -48,6 +64,7 @@ class Appointment(db.Model):
 class Consultation(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     patient_name = db.Column(db.String(120), nullable=False)
+    patient_email = db.Column(db.String(120), nullable=True)
     age = db.Column(db.Integer, nullable=False)
     symptoms = db.Column(db.Text, nullable=False)
     mode = db.Column(db.String(10), nullable=False)
@@ -55,31 +72,71 @@ class Consultation(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 def seed_doctors():
-    if Doctor.query.count() > 0:
-        return
-    
-    seed_data = [
-        ("Nagpur", "Dr. Anjali Deshmukh", "General Physician", 10),
-        ("Nagpur", "Dr. Rajesh Patil", "Cardiologist", 12),
-        ("Nagpur", "Dr. Kiran Agrawal", "Orthopedic Surgeon", 15),
-        ("Nagpur", "Dr. Meera Joshi", "ENT Specialist", 7),
-        ("Yavatmal", "Dr. Sneha Kulkarni", "Pediatrician", 8),
-        ("Yavatmal", "Dr. Amit Joshi", "Dermatologist", 6),
-        ("Yavatmal", "Dr. Nikhil More", "Neurologist", 11),
-        ("Yavatmal", "Dr. Kavita Rathi", "Gynecologist", 9),
-        ("Akola", "Dr. Priya Shinde", "Gynecologist", 9),
-        ("Akola", "Dr. Suresh Bhoyar", "General Surgeon", 14),
-        ("Akola", "Dr. Ramesh Kale", "Psychiatrist", 10),
-        ("Akola", "Dr. Manisha Wagh", "Ophthalmologist", 8),
-    ]
-    
-    for city, name, spec, exp in seed_data:
-        db.session.add(Doctor(city=city, name=name, specialty=spec, experience_years=exp))
-    
-    db.session.commit()
-    print("Doctors data seeded successfully!")
+    # Check if doctors already exist to avoid duplicates
+    if Doctor.query.count() == 0:
+        seed_data = [
+            ("Nagpur", "Dr. Anjali Deshmukh", "General Physician", 10, "dranjali@example.com"),
+            ("Nagpur", "Dr. Rajesh Patil", "Cardiologist", 12, "drrajesh@example.com"),
+            ("Nagpur", "Dr. Kiran Agrawal", "Orthopedic Surgeon", 15, "drkiran@example.com"),
+            ("Nagpur", "Dr. Meera Joshi", "ENT Specialist", 7, "drmeera@example.com"),
+            ("Yavatmal", "Dr. Sneha Kulkarni", "Pediatrician", 8, "drsneha@example.com"),
+            ("Yavatmal", "Dr. Amit Joshi", "Dermatologist", 6, "dramit@example.com"),
+            ("Yavatmal", "Dr. Nikhil More", "Neurologist", 11, "drnikhil@example.com"),
+            ("Yavatmal", "Dr. Kavita Rathi", "Gynecologist", 9, "drkavita@example.com"),
+            ("Akola", "Dr. Priya Shinde", "Gynecologist", 9, "drpriya@example.com"),
+            ("Akola", "Dr. Suresh Bhoyar", "General Surgeon", 14, "drsuresh@example.com"),
+            ("Akola", "Dr. Ramesh Kale", "Psychiatrist", 10, "drramesh@example.com"),
+            ("Akola", "Dr. Manisha Wagh", "Ophthalmologist", 8, "drmanisha@example.com"),
+        ]
+        
+        for city, name, spec, exp, email in seed_data:
+            db.session.add(Doctor(city=city, name=name, specialty=spec, experience_years=exp, email=email))
+        
+        db.session.commit()
+        print("Doctors data seeded successfully!")
+    else:
+        print("Doctors already exist in database.")
 
-# Routes for serving HTML pages
+def send_appointment_email(appointment, doctor_email=None):
+    """Send confirmation email for appointment"""
+    try:
+        # Only send if patient email is provided
+        if not appointment.patient_email:
+            print("No patient email provided, skipping email notification")
+            return False
+            
+        msg = Message(
+            subject=f"Appointment Confirmation - {appointment.patient_name}",
+            recipients=[appointment.patient_email],
+            cc=[doctor_email] if doctor_email else None
+        )
+        
+        msg.body = f"""
+        Dear {appointment.patient_name},
+        
+        Your appointment has been confirmed with the following details:
+        
+        Doctor: {appointment.doctor}
+        Date: {appointment.date}
+        Time: {appointment.time}
+        Location: {appointment.city}
+        
+        Please arrive 10 minutes before your scheduled time.
+        
+        Thank you for choosing Rural Telemedicine Connector.
+        
+        Best regards,
+        Rural Telemedicine Team
+        """
+        
+        mail.send(msg)
+        print(f"Appointment confirmation email sent to {appointment.patient_email}")
+        return True
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
+
+# Routes for serving HTML pages - FIXED ROUTE NAMES
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -89,21 +146,20 @@ def doctors():
     return render_template("doctors.html")
 
 @app.route("/appointment")
-def appointment():
+def appointment():  # Changed from appointment_page to appointment
     return render_template("appointment.html")
 
 @app.route("/consult")
 def consult():
     return render_template("consult.html")
 
-@app.route("/appointment-details")
-def appointment_details():
-    return render_template("appointment-details.html")
+@app.route("/appointment_details")
+def appointment_details():  # Changed from appointment_details_page to appointment_details
+    return render_template("appointment_details.html")
 
 # call route
 @app.route("/video_call/<room_name>")
 def video_call(room_name):
-    # render call.html and pass the room_name provided by server
     return render_template("call.html", room_name=room_name)
 
 # API Endpoints
@@ -124,6 +180,7 @@ def api_doctors():
         "specialty": d.specialty,
         "city": d.city,
         "experience_years": d.experience_years,
+        "email": d.email,
     } for d in q.order_by(Doctor.city, Doctor.name).all()]
     
     return jsonify(doctors=doctors)
@@ -139,6 +196,8 @@ def api_appointments():
         data = [{
             "id": a.id,
             "patient_name": a.patient_name,
+            "patient_email": a.patient_email,
+            "patient_phone": a.patient_phone,
             "city": a.city,
             "doctor": a.doctor,
             "date": a.date,
@@ -159,6 +218,8 @@ def api_appointments():
 
     appt = Appointment(
         patient_name=data["patient_name"].strip(),
+        patient_email=data.get("patient_email", ""),
+        patient_phone=data.get("patient_phone", ""),
         city=data["city"],
         doctor=data["doctor"],
         date=data["date"],
@@ -168,16 +229,26 @@ def api_appointments():
     db.session.add(appt)
     db.session.commit()
     
-    return jsonify(message="Appointment confirmed", id=appt.id,
+    # Try to send confirmation email
+    doctor_email = None
+    doctor_name = data["doctor"].split('(')[0].strip() if '(' in data["doctor"] else data["doctor"]
+    doctor_obj = Doctor.query.filter(Doctor.name.ilike(f"%{doctor_name}%")).first()
+    if doctor_obj:
+        doctor_email = doctor_obj.email
+    
+    email_sent = send_appointment_email(appt, doctor_email)
+    
+    return jsonify(message="Appointment confirmed", id=appt.id, email_sent=email_sent,
         appointment={
             "patient_name": appt.patient_name,
+            "patient_email": appt.patient_email,
+            "patient_phone": appt.patient_phone,
             "city": appt.city,
             "doctor": appt.doctor,
             "date": appt.date,
             "time": appt.time
         }
-            ), 201
-
+    ), 201
 
 @app.route("/api/consultations", methods=["POST", "GET"])
 def api_consultations():
@@ -185,6 +256,7 @@ def api_consultations():
         data = [{
             "id": c.id,
             "patient_name": c.patient_name,
+            "patient_email": c.patient_email,
             "age": c.age,
             "symptoms": c.symptoms,
             "mode": c.mode,
@@ -206,14 +278,14 @@ def api_consultations():
         age = int(data["age"])
     except ValueError:
         return jsonify(error="Age must be a number"), 400
-    # Generate a room name only for video/audio modes
+
     room_name = None
     if data["mode"] in ("video", "audio"):
-        # unique but readable room name
         room_name = f"telemed_{uuid.uuid4().hex[:10]}"
 
     cons = Consultation(
         patient_name=data["patient_name"].strip(),
+        patient_email=data.get("patient_email", ""),
         age=age,
         symptoms=data["symptoms"].strip(),
         mode=data["mode"],
@@ -223,7 +295,6 @@ def api_consultations():
     db.session.add(cons)
     db.session.commit()
     
-    # Build response including room info (if any)
     resp = {
         "message": "Consultation submitted",
         "id": cons.id,
@@ -235,27 +306,16 @@ def api_consultations():
     }
 
     if room_name:
-        # URL patient/doctor should open to join the same room
         resp["room_name"] = room_name
         resp["room_url"] = url_for("video_call", room_name=room_name, _external=False)
 
     return jsonify(resp), 201
 
-    return jsonify(message="Consultation submitted", id=cons.id,
-        consultation={
-            "patient_name": cons.patient_name,
-            "age": cons.age,
-            "mode": cons.mode
-        }), 201
-
-
-
 @app.route("/get_video_token", methods=["POST"])
 def get_video_token():
     data = request.get_json()
-    identity = data.get("identity")  # Example: patient or doctor username
+    identity = data.get("identity")
 
-    # Create access token
     token = AccessToken(
         TWILIO_ACCOUNT_SID,
         TWILIO_API_KEY_SID,
@@ -263,12 +323,10 @@ def get_video_token():
         identity=identity
     )
 
-    # Grant access to Video
     video_grant = VideoGrant()
     token.add_grant(video_grant)
 
     return jsonify({"token": token.to_jwt().decode("utf-8")})
-
 
 # Admin views
 @app.route("/admin/appointments")
@@ -277,12 +335,12 @@ def admin_appts():
     html = [
         "<h2>Appointments</h2>",
         "<table border=1 cellpadding=6>",
-        "<tr><th>ID</th><th>Patient</th><th>City</th><th>Doctor</th><th>Date</th><th>Time</th><th>Created</th></tr>",
+        "<tr><th>ID</th><th>Patient</th><th>Email</th><th>Phone</th><th>City</th><th>Doctor</th><th>Date</th><th>Time</th><th>Created</th></tr>",
     ]
     
     for a in rows:
         html.append(
-            f"<tr><td>{a.id}</td><td>{a.patient_name}</td><td>{a.city}</td><td>{a.doctor}</td><td>{a.date}</td><td>{a.time}</td><td>{a.created_at}</td></tr>"
+            f"<tr><td>{a.id}</td><td>{a.patient_name}</td><td>{a.patient_email or 'N/A'}</td><td>{a.patient_phone or 'N/A'}</td><td>{a.city}</td><td>{a.doctor}</td><td>{a.date}</td><td>{a.time}</td><td>{a.created_at}</td></tr>"
         )
     
     html.append("</table>")
@@ -294,12 +352,12 @@ def admin_cons():
     html = [
         "<h2>Consultations</h2>",
         "<table border=1 cellpadding=6>",
-        "<tr><th>ID</th><th>Patient</th><th>Age</th><th>Mode</th><th>Symptoms</th><th>Created</th></tr>",
+        "<tr><th>ID</th><th>Patient</th><th>Email</th><th>Age</th><th>Mode</th><th>Symptoms</th><th>Created</th></tr>",
     ]
     
     for c in rows:
         html.append(
-            f"<tr><td>{c.id}</td><td>{c.patient_name}</td><td>{c.age}</td><td>{c.mode}</td><td>{c.symptoms[:50]}...</td><td>{c.created_at}</td></tr>"
+            f"<tr><td>{c.id}</td><td>{c.patient_name}</td><td>{c.patient_email or 'N/A'}</td><td>{c.age}</td><td>{c.mode}</td><td>{c.symptoms[:50]}...</td><td>{c.created_at}</td></tr>"
         )
     
     html.append("</table>")
@@ -307,6 +365,7 @@ def admin_cons():
 
 if __name__ == "__main__":
     with app.app_context():
+        # Create all tables if they don't exist
         db.create_all()
         seed_doctors()
     
@@ -315,6 +374,5 @@ if __name__ == "__main__":
     print("Admin views:")
     print("  - Appointments: http://localhost:5000/admin/appointments")
     print("  - Consultations: http://localhost:5000/admin/consultations")
-    
     
     socketio.run(app, host="0.0.0.0", port=5000, debug=True)

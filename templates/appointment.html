@@ -5,59 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Book Appointment - Rural Telemedicine Connector</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-  <script>
-    // Set default doctor if passed in URL
-    window.onload = function() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const doctorParam = urlParams.get('doctor');
-      if (doctorParam) {
-        document.getElementById('doctor').value = doctorParam;
-      }
-    };
-
-    async function confirmAppointment(event) {
-      event.preventDefault();
-      
-      const name = document.getElementById("name").value;
-      const city = document.getElementById("city").value;
-      const doctor = document.getElementById("doctor").value;
-      const date = document.getElementById("date").value;
-      const time = document.getElementById("time").value;
-
-      if (!city || !doctor) {
-        alert("⚠ Please select both City and Doctor.");
-        return;
-      }
-
-      try {
-        const response = await fetch('/api/appointments', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            patient_name: name,
-            city: city,
-            doctor: doctor,
-            date: date,
-            time: time
-          })
-        });
-
-        const data = await response.json();
-        
-        if (response.ok) {
-          alert(`✅ Appointment confirmed!\n\nPatient: ${name}\nCity: ${city}\nDoctor: ${doctor}\nDate: ${date}\nTime: ${time}`);
-          window.location.href = "{{ url_for('index') }}";
-        } else {
-          alert(`❌ Error: ${data.error}`);
-        }
-      } catch (error) {
-        alert('❌ Network error. Please try again.');
-        console.error('Error:', error);
-      }
+  <style>
+    .form-section {
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     }
-  </script>
+    
+    .form-section label {
+      display: block;
+      margin: 10px 0 5px;
+      font-weight: bold;
+    }
+    
+    .form-section input, 
+    .form-section select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    
+    .btn {
+      background: #007BFF;
+      color: white;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      width: 100%;
+    }
+    
+    .btn:hover {
+      background: #0056b3;
+    }
+    
+    .page-header {
+      text-align: center;
+      margin: 20px 0;
+    }
+  </style>
 </head>
 <body>
   <!-- Navigation -->
@@ -67,6 +59,7 @@
       <li><a href="{{ url_for('index') }}">Home</a></li>
       <li><a href="{{ url_for('doctors') }}">Doctors</a></li>
       <li><a href="{{ url_for('appointment') }}" class="active">Book Appointment</a></li>
+      <li><a href="{{ url_for('appointment_details') }}">Appointment Details</a></li>
       <li><a href="{{ url_for('consult') }}">Consult Online</a></li>
     </ul>
   </nav>
@@ -76,10 +69,22 @@
   </header>
 
   <section class="form-section">
-    <form action="https://formspree.io/f/mdkdqgaw" method="POST" onsubmit="saveAppointment(event)">
-      <input type="hidden" name="_redirect" value="https://yourdomain.com/index.html">
+    <!-- Formspree form for email notifications -->
+    <form action="https://formspree.io/f/mdkdqgaw" method="POST" id="appointmentForm">
+      <!-- Hidden redirect after email is sent -->
+      <input type="hidden" name="_next" value="{{ url_for('appointment_details', _external=True) }}?success=true">
+      <input type="hidden" name="_subject" value="New Appointment Booking - Rural Telemedicine">
+      <input type="hidden" name="_format" value="plain">
+      <input type="hidden" name="_template" value="table">
+
       <label for="name">Full Name:</label>
-      <input type="text" id="name" name="patient_name"autocomplete="on" required>
+      <input type="text" id="name" name="patient_name" autocomplete="on" required>
+
+      <label for="email">Email Address:</label>
+      <input type="email" id="email" name="patient_email" autocomplete="email" required>
+
+      <label for="phone">Phone Number:</label>
+      <input type="tel" id="phone" name="patient_phone" autocomplete="tel">
 
       <label for="city">Select City:</label>
       <select id="city" name="city" required>
@@ -115,35 +120,55 @@
       <button class="btn" type="submit">Confirm Appointment</button>
     </form>
   </section>
+
   <script>
-async function saveAppointment(event) {
-  // collect values
-  const name = document.getElementById("name").value;
-  const city = document.getElementById("city").value;
-  const doctor = document.getElementById("doctor").value;
-  const date = document.getElementById("date").value;
-  const time = document.getElementById("time").value;
+  document.getElementById("appointmentForm").addEventListener("submit", async function(event) {
+    // Collect form values
+    const name = document.getElementById("name").value;
+    const email = document.getElementById("email").value;
+    const phone = document.getElementById("phone").value;
+    const city = document.getElementById("city").value;
+    const doctor = document.getElementById("doctor").value;
+    const date = document.getElementById("date").value;
+    const time = document.getElementById("time").value;
 
-  // fire-and-forget fetch to Flask API (don’t prevent default)
-  try {
-    await fetch('/api/appointments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        patient_name: name,
-        city: city,
-        doctor: doctor,
-        date: date,
-        time: time
-      })
-    });
-    // don’t block the form — Formspree will still submit & send email
-    console.log("Saved to backend as well.");
-  } catch (err) {
-    console.error("Could not save to backend:", err);
-  }
-}
-</script>
+    // Save to Flask backend
+    try {
+      const response = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          patient_name: name, 
+          patient_email: email,
+          patient_phone: phone,
+          city, 
+          doctor, 
+          date, 
+          time 
+        })
+      });
+      
+      const result = await response.json();
+      if (!response.ok) {
+        console.error("Backend error:", result.error);
+      }
+    } catch (err) {
+      console.error("❌ Could not save to backend:", err);
+    }
 
+    // Save to localStorage for appointment-details page
+    localStorage.setItem("latestAppointment", JSON.stringify({
+      patient_name: name,
+      patient_email: email,
+      patient_phone: phone,
+      city: city,
+      doctor: doctor,
+      date: date,
+      time: time
+    }));
+
+    // Let the form submit to Formspree normally
+  });
+  </script>
 </body>
 </html>

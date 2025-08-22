@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Appointment Details</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 0;
+    }
+    nav {
+      background: #007BFF;
+      padding: 15px;
+      color: white;
+    }
+    nav h1 {
+      margin: 0;
+      display: inline-block;
+    }
+    nav ul {
+      list-style: none;
+      display: flex;
+      gap: 15px;
+      padding: 10px 0;
+      margin: 0;
+    }
+    nav ul li a {
+      color: white;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    nav ul li a.active {
+      text-decoration: underline;
+    }
+    .container {
+      max-width: 600px;
+      margin: 50px auto;
+      background: #fff;
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0px 4px 12px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: #007BFF;
+    }
+    p {
+      font-size: 16px;
+      margin: 10px 0;
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    p:last-child {
+      border-bottom: none;
+    }
+    strong {
+      color: #555;
+    }
+    .success-message {
+      background: #d4edda;
+      color: #155724;
+      padding: 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav>
+    <h1>Rural Telemedicine Connector</h1>
+    <ul>
+      <li><a href="{{ url_for('index') }}">Home</a></li>
+      <li><a href="{{ url_for('doctors') }}">Doctors</a></li>
+      <li><a href="{{ url_for('appointment') }}">Book Appointment</a></li>
+      <li><a href="{{ url_for('appointment_details') }}" class="active">Appointment Details</a></li>
+      <li><a href="{{ url_for('consult') }}">Consult Online</a></li>
+    </ul>
+  </nav>
+
+  <!-- Appointment Card -->
+  <div class="container" id="appointment-container">
+    <h2>Appointment Details</h2>
+    
+    <div id="success-message" class="success-message" style="display: none;">
+      Your appointment has been successfully booked! A confirmation email has been sent.
+    </div>
+    
+    <p><strong>Patient Name:</strong> <span id="card-name"></span></p>
+    <p><strong>Email:</strong> <span id="card-email"></span></p>
+    <p><strong>Phone:</strong> <span id="card-phone"></span></p>
+    <p><strong>City:</strong> <span id="card-city"></span></p>
+    <p><strong>Doctor:</strong> <span id="card-doctor"></span></p>
+    <p><strong>Date:</strong> <span id="card-date"></span></p>
+    <p><strong>Time:</strong> <span id="card-time"></span></p>
+  </div>
+
+  <script>
+    // Check if redirected from successful form submission
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('success') === 'true') {
+      document.getElementById('success-message').style.display = 'block';
+    }
+
+    async function loadLatestAppointment() {
+      try {
+        // Fetch the latest appointment from Flask backend
+        const response = await fetch('/api/appointments');
+        const data = await response.json();
+
+        let latest = null;
+
+        // Get the latest appointment from backend
+        if (data.appointments && data.appointments.length > 0) {
+          latest = data.appointments[0]; // appointments are sorted by created_at DESC
+        }
+
+        // Fallback: if no backend data, try localStorage
+        if (!latest) {
+          latest = JSON.parse(localStorage.getItem('latestAppointment'));
+        }
+
+        if (latest) {
+          document.getElementById('card-name').textContent = latest.patient_name || 'Not provided';
+          document.getElementById('card-email').textContent = latest.patient_email || 'Not provided';
+          document.getElementById('card-phone').textContent = latest.patient_phone || 'Not provided';
+          document.getElementById('card-city').textContent = latest.city;
+          document.getElementById('card-doctor').textContent = latest.doctor;
+          document.getElementById('card-date').textContent = latest.date;
+          document.getElementById('card-time').textContent = latest.time;
+        } else {
+          document.getElementById('appointment-container').innerHTML = "<h2>No appointment details found.</h2><p>Please book an appointment first.</p>";
+        }
+      } catch (err) {
+        console.error("Error fetching latest appointment:", err);
+        document.getElementById('appointment-container').innerHTML = "<h2>Unable to load appointment details.</h2><p>Please try again later.</p>";
+      }
+    }
+
+    window.onload = loadLatestAppointment;
+  </script>
+</body>
+</html>
