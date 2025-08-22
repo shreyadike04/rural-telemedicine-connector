@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Telemedicine Call</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #meeting { height: 100vh; width: 100%; }
+    .controls { position: fixed; right: 12px; top: 12px; z-index: 999; }
+    .controls button { margin-left: 8px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <a href="{{ url_for('index') }}"><button>Exit</button></a>
+  </div>
+
+  <div id="meeting"></div>
+
+  <!-- Jitsi external API -->
+  <script src="https://meet.jit.si/external_api.js"></script>
+  <script>
+    (function () {
+      const roomName = "{{ room_name }}";
+      // read a query param ?audio_only=1 to start audio-only (optional)
+      const urlParams = new URLSearchParams(window.location.search);
+      const audioOnly = urlParams.get('audio_only') === '1';
+
+      const domain = "meet.jit.si";
+      const options = {
+        roomName: roomName,
+        parentNode: document.querySelector('#meeting'),
+        width: '100%',
+        height: '100%',
+        configOverwrite: {
+          startWithVideoMuted: audioOnly,
+          startWithAudioMuted: false
+        },
+        interfaceConfigOverwrite: {
+          // keep UI clean
+          TOOLBAR_BUTTONS: [
+            'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
+            'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
+            'livestreaming', 'settings', 'raisehand', 'videoquality',
+            'filmstrip', 'shortcuts', 'tileview'
+          ]
+        }
+      };
+
+      try {
+        const api = new JitsiMeetExternalAPI(domain, options);
+
+        // optional: handle events
+        api.addEventListener('participantLeft', () => console.log('participant left'));
+        api.addEventListener('participantJoined', () => console.log('participant joined'));
+      } catch (err) {
+        console.error('Jitsi error', err);
+        document.querySelector('#meeting').innerHTML = '<p>Unable to load video. Please try in a modern browser (Chrome/Edge/Firefox).</p>';
+      }
+    })();
+  </script>
+</body>
+</html>

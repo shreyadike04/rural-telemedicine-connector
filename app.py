@@ -1,16 +1,29 @@
 import os
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template , redirect, url_for
+import uuid
+from twilio.jwt.access_token import AccessToken
+from twilio.jwt.access_token.grants import VideoGrant
+from dotenv import load_dotenv
+load_dotenv()
+from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "telemedicine.db")
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["JSON_SORT_KEYS"] = False
+
+# Load credentials from environment variables (NOT hardcoded in code)
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_API_KEY_SID = os.getenv("TWILIO_API_KEY_SID")
+TWILIO_API_KEY_SECRET = os.getenv("TWILIO_API_KEY_SECRET")
 
 CORS(app)
 db = SQLAlchemy(app)
@@ -38,6 +51,7 @@ class Consultation(db.Model):
     age = db.Column(db.Integer, nullable=False)
     symptoms = db.Column(db.Text, nullable=False)
     mode = db.Column(db.String(10), nullable=False)
+    room_name = db.Column(db.String(120), nullable=True) 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 def seed_doctors():
@@ -81,6 +95,16 @@ def appointment():
 @app.route("/consult")
 def consult():
     return render_template("consult.html")
+
+@app.route("/appointment-details")
+def appointment_details():
+    return render_template("appointment-details.html")
+
+# call route
+@app.route("/video_call/<room_name>")
+def video_call(room_name):
+    # render call.html and pass the room_name provided by server
+    return render_template("call.html", room_name=room_name)
 
 # API Endpoints
 @app.route("/api/health")
@@ -154,6 +178,7 @@ def api_appointments():
         }
             ), 201
 
+
 @app.route("/api/consultations", methods=["POST", "GET"])
 def api_consultations():
     if request.method == "GET":
@@ -181,23 +206,69 @@ def api_consultations():
         age = int(data["age"])
     except ValueError:
         return jsonify(error="Age must be a number"), 400
-    
+    # Generate a room name only for video/audio modes
+    room_name = None
+    if data["mode"] in ("video", "audio"):
+        # unique but readable room name
+        room_name = f"telemed_{uuid.uuid4().hex[:10]}"
+
     cons = Consultation(
         patient_name=data["patient_name"].strip(),
         age=age,
         symptoms=data["symptoms"].strip(),
         mode=data["mode"],
+        room_name=room_name
     )
     
     db.session.add(cons)
     db.session.commit()
     
+    # Build response including room info (if any)
+    resp = {
+        "message": "Consultation submitted",
+        "id": cons.id,
+        "consultation": {
+            "patient_name": cons.patient_name,
+            "age": cons.age,
+            "mode": cons.mode,
+        }
+    }
+
+    if room_name:
+        # URL patient/doctor should open to join the same room
+        resp["room_name"] = room_name
+        resp["room_url"] = url_for("video_call", room_name=room_name, _external=False)
+
+    return jsonify(resp), 201
+
     return jsonify(message="Consultation submitted", id=cons.id,
         consultation={
             "patient_name": cons.patient_name,
             "age": cons.age,
             "mode": cons.mode
         }), 201
+
+
+
+@app.route("/get_video_token", methods=["POST"])
+def get_video_token():
+    data = request.get_json()
+    identity = data.get("identity")  # Example: patient or doctor username
+
+    # Create access token
+    token = AccessToken(
+        TWILIO_ACCOUNT_SID,
+        TWILIO_API_KEY_SID,
+        TWILIO_API_KEY_SECRET,
+        identity=identity
+    )
+
+    # Grant access to Video
+    video_grant = VideoGrant()
+    token.add_grant(video_grant)
+
+    return jsonify({"token": token.to_jwt().decode("utf-8")})
+
 
 # Admin views
 @app.route("/admin/appointments")
@@ -246,4 +317,4 @@ if __name__ == "__main__":
     print("  - Consultations: http://localhost:5000/admin/consultations")
     
     
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True)

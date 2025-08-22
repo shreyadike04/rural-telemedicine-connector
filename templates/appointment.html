@@ -76,12 +76,13 @@
   </header>
 
   <section class="form-section">
-    <form onsubmit="confirmAppointment(event)">
+    <form action="https://formspree.io/f/mdkdqgaw" method="POST" onsubmit="saveAppointment(event)">
+      <input type="hidden" name="_redirect" value="https://yourdomain.com/index.html">
       <label for="name">Full Name:</label>
-      <input type="text" id="name" autocomplete="on" required>
+      <input type="text" id="name" name="patient_name"autocomplete="on" required>
 
       <label for="city">Select City:</label>
-      <select id="city" required>
+      <select id="city" name="city" required>
         <option value="" disabled selected>Select City</option>
         <option value="Nagpur">Nagpur</option>
         <option value="Yavatmal">Yavatmal</option>
@@ -89,7 +90,7 @@
       </select>
 
       <label for="doctor">Select Doctor:</label>
-      <input type="text" id="doctor" list="doctors-list" required placeholder="Select or type doctor name">
+      <input type="text" id="doctor" name="doctor" list="doctors-list" required placeholder="Select or type doctor name">
       <datalist id="doctors-list">
         <option value="Dr. Anjali Deshmukh (General Physician)">
         <option value="Dr. Rajesh Patil (Cardiologist)">
@@ -106,13 +107,43 @@
       </datalist>
 
       <label for="date">Date:</label>
-      <input type="date" id="date" required>
+      <input type="date" id="date" name="date" required>
 
       <label for="time">Time:</label>
-      <input type="time" id="time" required>
+      <input type="time" id="time" name="time" required>
 
       <button class="btn" type="submit">Confirm Appointment</button>
     </form>
   </section>
+  <script>
+async function saveAppointment(event) {
+  // collect values
+  const name = document.getElementById("name").value;
+  const city = document.getElementById("city").value;
+  const doctor = document.getElementById("doctor").value;
+  const date = document.getElementById("date").value;
+  const time = document.getElementById("time").value;
+
+  // fire-and-forget fetch to Flask API (don’t prevent default)
+  try {
+    await fetch('/api/appointments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        patient_name: name,
+        city: city,
+        doctor: doctor,
+        date: date,
+        time: time
+      })
+    });
+    // don’t block the form — Formspree will still submit & send email
+    console.log("Saved to backend as well.");
+  } catch (err) {
+    console.error("Could not save to backend:", err);
+  }
+}
+</script>
+
 </body>
 </html>

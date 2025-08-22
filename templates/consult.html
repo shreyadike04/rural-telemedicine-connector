@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Consult Online - Rural Telemedicine Connector</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script src="https://meet.jit.si/external_api.js"></script>
   <style>
     .help-text {
       font-size: 13px;
@@ -42,16 +43,79 @@
         const data = await response.json();
         
         if (response.ok) {
-          alert("✅ Your online consultation request has been submitted successfully!");
-          window.location.href = "{{ url_for('index') }}";
-        } else {
-          alert(`❌ Error: ${data.error}`);
-        }
-      } catch (error) {
-        alert('❌ Network error. Please try again.');
-        console.error('Error:', error);
+  // parse data
+  const result = data; // already parsed above as `const data = await response.json();`
+  if (mode === "video" && result.room_url) {
+    // open the room in a new window (patient side)
+    window.open(result.room_url, "_blank", "noopener");
+    alert("✅ Video room opened. Please share the window/tab with the doctor or have the doctor open the same link.");
+    window.location.href = "{{ url_for('index') }}";
+  } else if (mode === "audio" && result.room_url) {
+    // open audio-only room (use the audio_only param)
+    const audioUrl = result.room_url + "?audio_only=1";
+    window.open(audioUrl, "_blank", "noopener");
+    alert("✅ Audio room opened.");
+    window.location.href = "{{ url_for('index') }}";
+  } else {
+    // chat / fallback
+    alert("✅ Your consultation request has been submitted successfully!");
+    window.location.href = "{{ url_for('index') }}";
+  }
+}
+ else {
+        alert(`❌ Error: ${data.error}`);
       }
+    } catch (error) {
+      alert('❌ Network error. Please try again.');
+      console.error('Error:', error);
     }
+  }
+  // Show popup
+  function showPopup(type, callback) {
+    const popup = document.createElement("div");
+    popup.innerHTML = `
+      <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;">
+        <div style="background:#fff;padding:20px;border-radius:10px;text-align:center;">
+          <h3>${type} Consultation</h3>
+          <p>Click below to start your ${type.toLowerCase()} consultation.</p>
+          <button id="startCallBtn">Start ${type}</button>
+          <button onclick="this.parentElement.parentElement.remove()">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(popup);
+    document.getElementById("startCallBtn").onclick = () => {
+      popup.remove();
+      callback();
+    };
+  }
+
+  // Start Video Call
+  function startVideoCall() {
+    const roomName = "telemedicine_" + Date.now();
+    const domain = "meet.jit.si";
+    const options = {
+      roomName: roomName,
+      width: "100%",
+      height: 600,
+      parentNode: document.body,
+    };
+    new JitsiMeetExternalAPI(domain, options);
+  }
+
+  // Start Audio Call (video muted)
+  function startAudioCall() {
+    const roomName = "telemedicine_" + Date.now();
+    const domain = "meet.jit.si";
+    const options = {
+      roomName: roomName,
+      width: "100%",
+      height: 600,
+      parentNode: document.body,
+      configOverwrite: { startWithVideoMuted: true } // ✅ only audio
+    };
+    new JitsiMeetExternalAPI(domain, options);
+  }
   </script>
 </head>
 <body>
