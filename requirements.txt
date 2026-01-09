@@ -4,3 +4,5 @@ Flask-CORS==4.0.0
 flask
 flask-socketio
 eventlet
+twilio
+python-dotenv
